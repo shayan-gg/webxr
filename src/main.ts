@@ -8,12 +8,20 @@ import { Orbitcontrol } from 'three/examples/jsm/orbitcontrol';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 import GUI from 'three/examples/jsm/libs/lil-gui.module.min.js';
 
-let container: HTMLDivElement;
-let camera: { aspect: number; updateProjectionMatrix: () => void; }, scene: { add: (arg0: any) => void; }, renderer: { domElement: HTMLElement | undefined; setPixelRatio: (arg0: number) => void; setSize: (arg0: number, arg1: number) => void; xr: { enabled: boolean; getController: (arg0: number) => any; }; setAnimationLoop: (arg0: () => void) => void; render: (arg0: any, arg1: any) => void; };
-let controller: { matrixWorld: any; addEventListener: (arg0: string, arg1: () => void) => void; };
+let container;
+let camera;
+let renderer;
+let controller;
+let scene;
+
+// XR globals.
+let xrButton = null;
+let xrRefSpace = null;
+let xrViewerSpace = null;
+let xrHitTestSource = null;
 
 initThree();
-initWebXR();
+// initWebXR();
 stats();
 
 CameraControls.install( { THREE: THREE } );
@@ -57,6 +65,17 @@ function initWebXR() {
   function webXrInit() {
     renderer.xr.enabled = true;
     container.appendChild( renderer.domElement );
+
+    // xrButton = new XRButton({
+    //   // onRequestSession: onRequestSession,
+    //   // onEndSession: onEndSession,
+    //   textEnterXRTitle: "START AR",
+    //   textXRNotFoundTitle: "AR NOT FOUND",
+    //   textExitXRTitle: "EXIT  AR",
+    // });
+
+    // document.querySelector('header').appendChild(xrButton.domElement);
+
     document.body.appendChild( XRButton.createButton( renderer ) );
   }
 
@@ -117,3 +136,79 @@ function stats() {
   
   statsUpdate();
 }
+
+
+scene.clear = false;
+
+function initXR() {
+  xrButton = new XRButton({
+    onRequestSession: onRequestSession,
+    onEndSession: onEndSession,
+    textEnterXRTitle: "START AR",
+    textXRNotFoundTitle: "AR NOT FOUND",
+    textExitXRTitle: "EXIT  AR",
+  });
+  console.log(xrButton);
+  document.querySelector('header').appendChild(xrButton.domElement);
+
+  if (navigator.xr) {
+    navigator.xr.isSessionSupported('immersive-ar')
+                .then((supported) => {
+      xrButton.enabled = supported;
+    });
+  }
+}
+
+function onRequestSession() {
+  return navigator.xr.requestSession('immersive-ar', {requiredFeatures: ['local', 'hit-test']})
+                      .then((session) => {
+    xrButton.setSession(session);
+    onSessionStarted(session);
+  });
+}
+
+function onSessionStarted(session) {
+  session.addEventListener('end', onSessionEnded);
+  session.addEventListener('select', onSelect);
+
+  if (!gl) {
+    gl = createWebGLContext({
+      xrCompatible: true
+    });
+
+    renderer = new Renderer(gl);
+
+    scene.setRenderer(renderer);
+  }
+
+  session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+
+  // In this sample we want to cast a ray straight out from the viewer's
+  // position and render a reticle where it intersects with a real world
+  // surface. To do this we first get the viewer space, then create a
+  // hitTestSource that tracks it.
+  session.requestReferenceSpace('viewer').then((refSpace) => {
+    xrViewerSpace = refSpace;
+    session.requestHitTestSource({ space: xrViewerSpace }).then((hitTestSource) => {
+      xrHitTestSource = hitTestSource;
+    });
+  });
+
+  session.requestReferenceSpace('local').then((refSpace) => {
+    xrRefSpace = refSpace;
+
+    session.requestAnimationFrame(onXRFrame);
+  });
+}
+
+function onEndSession(session) {
+  xrHitTestSource.cancel();
+  xrHitTestSource = null;
+  session.end();
+}
+
+function onSessionEnded(event) {
+  xrButton.setSession(null);
+}
+
+initXR();
